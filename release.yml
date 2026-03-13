@@ -1,0 +1,126 @@
+name: Release on Version Bump
+
+# Version: 1.0.0
+# Full setup and usage documentation:
+# https://github.com/stehardy775/wordpress-github-updater/README.md
+#
+# License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
+# https://github.com/stehardy775/wordpress-github-updater/LICENSE
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read current version from plugin/theme source
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Auto-detect SOURCE_FILE with optional override.
+          # Priority:
+          # 1) SOURCE_FILE_OVERRIDE (manual)
+          # 2) style.css (theme, with Theme Name header)
+          # 3) <repo-name>.php
+          # 4) <repo-name>/<repo-name>.php
+          # 5) First PHP file containing a Plugin Name header
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+
+          if [[ -n "${SOURCE_FILE_OVERRIDE:-}" ]]; then
+            SOURCE_FILE="$SOURCE_FILE_OVERRIDE"
+          elif [[ -f "style.css" ]] && grep -qiE '^\s*Theme Name\s*:' style.css; then
+            SOURCE_FILE="style.css"
+          elif [[ -f "${REPO_NAME}.php" ]]; then
+            SOURCE_FILE="${REPO_NAME}.php"
+          elif [[ -f "${REPO_NAME}/${REPO_NAME}.php" ]]; then
+            SOURCE_FILE="${REPO_NAME}/${REPO_NAME}.php"
+          else
+            SOURCE_FILE="$(grep -Rsl --include='*.php' -m1 -E '^\s*\*?\s*Plugin Name\s*:' . || true)"
+          fi
+
+          if [[ -z "$SOURCE_FILE" ]]; then
+            echo "Could not detect SOURCE_FILE. Set SOURCE_FILE_OVERRIDE in workflow or repository variables."
+            exit 1
+          fi
+
+          echo "Using SOURCE_FILE=$SOURCE_FILE"
+
+          version_line=$(grep -m1 "Version:" "$SOURCE_FILE" || true)
+          if [[ -z "$version_line" ]]; then
+            echo "No Version header found in $SOURCE_FILE"
+            exit 1
+          fi
+
+          # Extract first version-like token (supports values such as 0.600,
+          # 1.2.3, 2.0.0.1, and optional prerelease/build suffixes).
+          version=$(printf '%s\n' "$version_line" | grep -oE '[0-9]+(\.[0-9]+){1,3}([.-][0-9A-Za-z]+)?' | head -n1 || true)
+          if [[ -z "$version" ]]; then
+            echo "Could not parse a valid version token from line: $version_line"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether tag already exists
+        id: tag_check
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.current.outputs.tag }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release zip
+        if: steps.tag_check.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Default slug is derived from the repository name.
+          # Example: {owner}/{repo-name} -> repo-name
+          # Optional: set SLUG_OVERRIDE if your zip root folder must differ.
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          SLUG="${SLUG_OVERRIDE:-$REPO_NAME}"
+
+          rm -rf "$SLUG"
+          mkdir -p "$SLUG"
+
+          # Copy project files into release package without recursing into
+          # the destination folder itself.
+          rsync -a \
+            --exclude "$SLUG" \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude ".gitignore" \
+            ./ "$SLUG/"
+
+          zip -r "${SLUG}.zip" "$SLUG"
+
+      - name: Create GitHub release
+        if: steps.tag_check.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.current.outputs.tag }}" *.zip \
+            --title "${{ steps.current.outputs.tag }}" \
+            --generate-notes

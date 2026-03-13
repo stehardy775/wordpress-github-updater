@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# BEGIN wordpress-github-updater
+# Keeps GitHubUpdater.php and release.yml up to date from the upstream repo.
+#
+# - GitHubUpdater.php  -> includes/GitHubUpdater.php   (or UPDATER_DEST in config)
+# - release.yml        -> .github/workflows/release.yml (or RELEASE_DEST in config)
+#
+# Install as a Git pre-commit hook:
+#   cp pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Or run manually at any time from your project root:
+#   bash pre-commit
+#
+# Optional config file (.githubupdater.conf in repo root):
+#   UPDATER_DEST=<path>     destination relative to repo root (default: includes/GitHubUpdater.php)
+#   RELEASE_DEST=<path>     destination relative to repo root (default: .github/workflows/release.yml)
+
+BASE_URL="https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Defaults
+UPDATER_SRC="${BASE_URL}/GitHubUpdater.php"
+UPDATER_DEST="includes/GitHubUpdater.php"
+RELEASE_SRC="${BASE_URL}/release.yml"
+RELEASE_DEST=".github/workflows/release.yml"
+
+# Load optional config
+CONFIG_FILE="${REPO_ROOT}/.githubupdater.conf"
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+download() {
+  local src="$1"
+  local dest="${REPO_ROOT}/$2"
+  echo "Downloading: ${src}"
+  echo "         -> ${2}"
+  mkdir -p "$(dirname "$dest")"
+  curl -fsSL "$src" -o "$dest"
+}
+
+download "$UPDATER_SRC" "$UPDATER_DEST"
+download "$RELEASE_SRC" "$RELEASE_DEST"
+
+echo "Done."
+# END wordpress-github-updater
