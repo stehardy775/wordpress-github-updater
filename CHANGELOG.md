@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.0.1 - 17/06/2026
+
+### Added
+- `release.yml`: additional default packaging excludes for tool caches — `.phpcs-cache` (PHP_CodeSniffer) and `.phpunit.cache` (PHPUnit 10+ cache directory).
+
 ## 2.0.0 - 17/06/2026
 
 ### Added

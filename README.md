@@ -219,7 +219,7 @@ The workflow already excludes the following from the release zip, so you rarely 
 - **AI assistant config/metadata:** `.claude`, `CLAUDE.md`, `.codex`, `AGENTS.md`, `.cursor`, `.cursorrules`, `.cursorignore`, `.aider*`, `.windsurf`, `.windsurfrules`, `.continue`, `.gemini`, `GEMINI.md`, `copilot-instructions.md`, `.copilot`
 - **OS & editor cruft:** `.DS_Store`, `Thumbs.db`, `.vscode`, `.idea`, `.editorconfig`
 - **Dependency & build artefacts:** `node_modules`
-- **Linting & testing config:** `phpcs.xml`, `phpcs.xml.dist`, `.phpcs.xml.dist`, `phpunit.xml`, `phpunit.xml.dist`, `.phpunit.result.cache`
+- **Linting & testing config and caches:** `phpcs.xml`, `phpcs.xml.dist`, `.phpcs.xml.dist`, `.phpcs-cache`, `phpunit.xml`, `phpunit.xml.dist`, `.phpunit.result.cache`, `.phpunit.cache`
 - **This updater's own tooling:** `.githubupdater.conf`, `pre-commit`
 
 > **Note:** `vendor/` (Composer) is **not** excluded by default, since many plugins ship their runtime dependencies there. Add it to `EXCLUDE_EXTRA` if your build installs dependencies separately.

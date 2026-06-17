@@ -1,6 +1,6 @@
 name: Release on Version Bump
 
-# Version: 2.0.0
+# Version: 2.0.1
 # Full setup and usage documentation:
 # https://github.com/stehardy775/wordpress-github-updater/README.md
 #
@@ -171,13 +171,15 @@ jobs:
             ".editorconfig"
             # Dependency & build artefacts
             "node_modules"
-            # Linting & testing config (dev-only)
+            # Linting & testing config and caches (dev-only)
             "phpcs.xml"
             "phpcs.xml.dist"
             ".phpcs.xml.dist"
+            ".phpcs-cache"
             "phpunit.xml"
             "phpunit.xml.dist"
             ".phpunit.result.cache"
+            ".phpunit.cache"
             # This updater's own tooling (not part of the shipped product)
             ".githubupdater.conf"
             "pre-commit"

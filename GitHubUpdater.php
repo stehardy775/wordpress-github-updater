@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -422,7 +422,7 @@ class GitHubUpdater {
 			'Accept'               => $for_asset
 				? 'application/octet-stream'
 				: 'application/vnd.github+json',
-			'User-Agent'           => 'WordPress-GitHubUpdater/2.0',
+			'User-Agent'           => 'WordPress-GitHubUpdater/2.0.1',
 			'X-GitHub-Api-Version' => '2022-11-28',
 		];
 	}
