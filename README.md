@@ -19,16 +19,34 @@ A single-file drop-in that enables automatic updates for WordPress plugins and t
 
 ### 1. Copy the required files
 
-Copy these two files from this repository into your project:
+The quickest way is to run this from **inside your project's Git repository** — it fetches both files to the default destinations in one step:
+
+```bash
+# Fetch the files only:
+curl -fsSL https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main/pre-commit | bash
+
+# Fetch the files AND install the pre-commit hook for auto-updates (see step 2):
+curl -fsSL https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main/pre-commit | INSTALL_HOOK=1 bash
+```
+
+Or copy these two files from this repository into your project manually:
 
 | File | Destination in your project |
 |---|---|
 | `GitHubUpdater.php` | `includes/GitHubUpdater.php` |
 | `release.yml` | `.github/workflows/release.yml` |
 
+> Both paths default to those above, or whatever you set in [`.githubupdater.conf`](#workflow-options). The command must be run within a Git working tree, as it resolves paths via `git rev-parse --show-toplevel`. The plain command **does not** touch your Git hooks — pass `INSTALL_HOOK=1` to also install the auto-update hook (it safely appends to an existing `pre-commit` hook rather than overwriting it) and drop a `.githubupdater.conf` template in your repo root if one isn't already there.
+
 ### 2. Auto-update (optional)
 
-To keep both files up to date automatically, merge `pre-commit` into your project's Git hooks folder. This safely appends the updater block to any existing hook rather than overwriting it:
+To keep both files up to date automatically, install `pre-commit` into your project's Git hooks folder. The simplest way is the one-liner from step 1:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main/pre-commit | INSTALL_HOOK=1 bash
+```
+
+Or, if you already have the `pre-commit` file in your project, merge it into the hooks folder manually. This safely appends the updater block to any existing hook rather than overwriting it:
 
 ```bash
 if [ ! -f .git/hooks/pre-commit ]; then
@@ -39,11 +57,11 @@ fi
 chmod +x .git/hooks/pre-commit
 ```
 
-It will now run automatically on every commit. To run it manually at any time:
+Both approaches preserve an existing `pre-commit` hook and are safe to re-run — the updater block is only added once. The `INSTALL_HOOK=1` one-liner additionally seeds a `.githubupdater.conf` template (only if you don't already have one), giving you a ready-to-edit config for paths and packaging options.
 
-```bash
-bash .git/hooks/pre-commit
-```
+> **Other hook managers are left alone.** If your existing `pre-commit` hook is managed by another tool (Husky, [pre-commit.com](https://pre-commit.com), lefthook) or isn't a shell script, `INSTALL_HOOK=1` detects this and **won't modify it** — it prints how to wire the updater in yourself instead. It only appends to plain, unmanaged shell hooks.
+
+It will now run automatically on every commit. To run it on demand instead, see [Fetch the latest copy manually via CLI](#3-fetch-the-latest-copy-manually-via-cli) below.
 
 To override the destination paths, copy `.githubupdater.conf` into your project root and edit:
 
@@ -51,6 +69,23 @@ To override the destination paths, copy `.githubupdater.conf` into your project 
 UPDATER_DEST=includes/GitHubUpdater.php
 RELEASE_DEST=.github/workflows/release.yml
 ```
+
+### 3. Fetch the latest copy manually via CLI
+
+You don't need the hook installed to pull the latest `GitHubUpdater.php` and `release.yml`. Run any of these from **inside the target repository** (the script locates the repo root with `git` and honours `.githubupdater.conf` for destinations):
+
+```bash
+# If you installed the hook:
+bash .git/hooks/pre-commit
+
+# If you copied the pre-commit file into your project root:
+bash pre-commit
+
+# Without anything installed locally — fetch and run the latest script directly:
+curl -fsSL https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main/pre-commit | bash
+```
+
+Each writes the latest files to the configured destinations (or the defaults: `includes/GitHubUpdater.php` and `.github/workflows/release.yml`) and prints what it downloaded. The command must be run from within a Git working tree — it uses `git rev-parse --show-toplevel` to resolve paths.
 
 ---
 
@@ -76,13 +111,20 @@ Expected WordPress file layout:
 {owner}/{repo-name}/style.css
 ```
 
-The three arguments are:
+The arguments are:
 
-| Argument | Description |
-|---|---|
-| `$file` | Absolute path to the plugin's main file or theme's `functions.php`. Use `__FILE__`. |
-| `$repo` | GitHub repository in `owner/repo` format. |
-| `$token` | A GitHub Fine-Grained Personal Access Token (see below). |
+| Argument | Required | Description |
+|---|---|---|
+| `$file` | Yes | Absolute path to the plugin's main file or theme's `functions.php`. Use `__FILE__`. |
+| `$repo` | Yes | GitHub repository in `owner/repo` format. |
+| `$token` | Yes | A GitHub Fine-Grained Personal Access Token (see below). |
+| `$asset` | No | Filename of the release asset to install (e.g. `my-plugin.zip`). A path such as `dist/my-plugin.zip` is accepted — only the filename is used. Leave empty (the default) to install GitHub's auto-generated source zipball. See [Which zip gets installed?](#which-zip-gets-installed). |
+
+To install a specific attached zip instead of the source zipball:
+
+```php
+new GitHubUpdater( __FILE__, '{owner}/{repo-name}', MY_GITHUB_TOKEN, 'my-plugin.zip' );
+```
 
 ---
 
@@ -110,7 +152,21 @@ The three arguments are:
 1. In your repository, go to **Releases → Draft a new release**.
 2. Create a tag using [semver](https://semver.org/) — e.g. `v1.2.3`. WordPress uses this to determine whether an update is available.
 3. Add release notes to the body (shown in the WordPress "View details" popup).
-4. **Optionally**, attach a hand-built `.zip` as a release asset when you need to control the archive contents (e.g. exclude `node_modules`, `.github`, tests). If no asset is attached, the class falls back to GitHub's auto-generated source zipball.
+4. **Optionally**, attach a hand-built `.zip` to control the archive contents (e.g. exclude `node_modules`, `.github`, tests), then pass its filename as the `$asset` constructor argument.
+
+### Which zip gets installed?
+
+When WordPress installs an update, the updater chooses the package based on the optional `$asset` constructor argument ([`download_url()`](GitHubUpdater.php)):
+
+- **`$asset` set** (e.g. `'my-plugin.zip'`): the updater installs the release asset with that filename, giving you full control over the archive contents. If no asset with that name exists on the release, it safely falls back to the source zipball.
+- **`$asset` empty** (the default): the updater installs GitHub's **auto-generated source zipball** — no need to attach or build anything.
+
+There is no auto-guessing of which attached zip to use: the package is either the asset you name or the source zipball. This makes the behaviour predictable when a release carries several assets (e.g. zip + checksums + screenshots).
+
+How the named asset gets onto the release:
+
+- **Manual release:** when drafting the release, drag your zip into the **"Attach binaries by dropping them here or selecting them"** area, then pass its filename as `$asset`.
+- **Automated release (`release.yml`):** the workflow builds `<slug>.zip` (applying the [default excludes](#default-packaging-excludes) and your `EXCLUDE_EXTRA`) and attaches it. To install that curated zip rather than the raw source zipball, pass `'<slug>.zip'` as `$asset` — otherwise the workflow's excludes are not applied to what users receive.
 
 ### Zip layout requirement
 
@@ -133,9 +189,40 @@ This repository stores `release.yml` as a **reference template**, not as an acti
 In each plugin/theme repository that should publish releases:
 
 1. Copy `release.yml` from this repository into the target repository at `.github/workflows/release.yml`.
-2. (Optional) Set `SOURCE_FILE_OVERRIDE` when auto-detection is not suitable.
-3. (Optional) Set `SLUG_OVERRIDE` when zip root folder should differ from repo name.
-4. Commit and push.
+2. (Optional) Configure the workflow via `.githubupdater.conf` in the repo root (see below).
+3. Commit and push.
+
+### Workflow options
+
+All workflow options live in **`.githubupdater.conf`** at the repository root — the same file the [pre-commit hook](#2-auto-update-optional) uses for copy destinations. On each run the workflow reads this file (via the **Load project config** step) and applies any keys it recognises. Lines are shell assignments (`KEY=value`); quote values containing spaces.
+
+| Key | Purpose |
+|---|---|
+| `SOURCE_FILE_OVERRIDE` | Force the file the version is read from, when auto-detection isn't suitable. |
+| `SLUG_OVERRIDE` | Override the zip's root folder name (defaults to the repo name). |
+| `EXCLUDE_EXTRA` | Extra paths/patterns to exclude from the release zip, in addition to the built-in defaults. |
+
+`EXCLUDE_EXTRA` is a whitespace- or newline-separated list of `rsync` patterns. Example `.githubupdater.conf`:
+
+```bash
+SLUG_OVERRIDE=my-plugin
+EXCLUDE_EXTRA="tests docs *.dist phpunit.xml.dist composer.json composer.lock"
+```
+
+> A value set in `.githubupdater.conf` takes precedence. Any option not set there falls back to a matching workflow `env:` value (if you add one) and then to the built-in default — so you can still override per-run from the workflow YAML if needed.
+
+### Default packaging excludes
+
+The workflow already excludes the following from the release zip, so you rarely need `EXCLUDE_EXTRA` for common cases:
+
+- **Version control & CI:** `.git`, `.github`, `.gitignore`, `.gitattributes`, `.gitmodules`
+- **AI assistant config/metadata:** `.claude`, `CLAUDE.md`, `.codex`, `AGENTS.md`, `.cursor`, `.cursorrules`, `.cursorignore`, `.aider*`, `.windsurf`, `.windsurfrules`, `.continue`, `.gemini`, `GEMINI.md`, `copilot-instructions.md`, `.copilot`
+- **OS & editor cruft:** `.DS_Store`, `Thumbs.db`, `.vscode`, `.idea`, `.editorconfig`
+- **Dependency & build artefacts:** `node_modules`
+- **Linting & testing config:** `phpcs.xml`, `phpcs.xml.dist`, `.phpcs.xml.dist`, `phpunit.xml`, `phpunit.xml.dist`, `.phpunit.result.cache`
+- **This updater's own tooling:** `.githubupdater.conf`, `pre-commit`
+
+> **Note:** `vendor/` (Composer) is **not** excluded by default, since many plugins ship their runtime dependencies there. Add it to `EXCLUDE_EXTRA` if your build installs dependencies separately.
 
 Maintenance note:
 
@@ -165,6 +252,10 @@ Behavior in the target project:
 4. When the user clicks **Update**, `upgrader_pre_download` intercepts the download and injects the `Authorization` header so private repositories are accessible.
 5. After extraction, `upgrader_source_selection` renames the randomly-named GitHub folder to the correct slug.
 
+> **Pre-releases and drafts are ignored.** The `/releases/latest` endpoint only returns the most recent **published, non-prerelease** release. Tags marked as a *draft* or *pre-release* on GitHub (e.g. `v1.2.3-beta`) will not trigger a WordPress update — publish a normal release when you want users to receive it.
+
+> **Failed lookups are cached briefly.** Successful release lookups are cached for 5 minutes; failed ones (API down, rate limited, bad token) are cached for 1 minute so a broken setup doesn't slow every admin page load while you fix it. Call `clear_cache()` to force an immediate re-check.
+
 ### Plugin Details Popup Content
 
 For the WordPress "View details" popup:
@@ -172,6 +263,24 @@ For the WordPress "View details" popup:
 - Title uses the plugin header `Plugin Name` (or theme `Name`) instead of slug.
 - Description tab uses `README.md` (or `readme.md`) when present; otherwise it falls back to the GitHub release title.
 - Changelog tab uses `CHANGELOG.md` (or `changelog.md`) when present; otherwise it falls back to release notes body, then "See GitHub Releases for changelog.".
+
+Markdown sources are rendered to a safe HTML subset (headings, bold, italic, inline/fenced code, links, and lists). The output is sanitised with `wp_kses_post()`, so unsupported syntax simply appears as plain text rather than being executed.
+
+### Compatibility metadata
+
+The "Requires PHP", "Requires at least" (minimum WordPress), and "Tested up to" values shown by WordPress are read from your plugin header / theme `style.css` — they are **not** hard-coded. Add the standard headers to advertise them, for example:
+
+```php
+/**
+ * Plugin Name: My Plugin
+ * Version: 1.2.3
+ * Requires at least: 6.9
+ * Requires PHP: 8.0
+ * Tested up to: 6.9
+ */
+```
+
+Any header you omit is simply left out of the update payload rather than being guessed.
 
 ---
 

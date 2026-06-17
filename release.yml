@@ -1,6 +1,6 @@
 name: Release on Version Bump
 
-# Version: 1.0.0
+# Version: 2.0.0
 # Full setup and usage documentation:
 # https://github.com/stehardy775/wordpress-github-updater/README.md
 #
@@ -24,6 +24,39 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Load project config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Optional single config file at the repo root. The same file is
+          # read by the local pre-commit hook (copy destinations) and by this
+          # workflow (packaging options); each ignores keys it doesn't use.
+          CONFIG_FILE=".githubupdater.conf"
+          if [[ ! -f "$CONFIG_FILE" ]]; then
+            echo "No $CONFIG_FILE found; using defaults."
+            exit 0
+          fi
+
+          # shellcheck disable=SC1090
+          source "$CONFIG_FILE"
+
+          # Promote recognised options to the job environment so the later
+          # steps (which run in separate shells) can read them. A value set in
+          # the config file wins; anything not set there falls back to an
+          # existing environment value or the built-in default.
+          for var in SOURCE_FILE_OVERRIDE SLUG_OVERRIDE EXCLUDE_EXTRA; do
+            value="${!var:-}"
+            [[ -n "$value" ]] || continue
+            # Heredoc syntax so multi-line values (e.g. EXCLUDE_EXTRA) survive.
+            {
+              echo "${var}<<__GHU_EOF__"
+              printf '%s\n' "$value"
+              echo "__GHU_EOF__"
+            } >> "$GITHUB_ENV"
+            echo "Loaded ${var} from ${CONFIG_FILE}"
+          done
 
       - name: Read current version from plugin/theme source
         id: current
@@ -53,7 +86,7 @@ jobs:
           fi
 
           if [[ -z "$SOURCE_FILE" ]]; then
-            echo "Could not detect SOURCE_FILE. Set SOURCE_FILE_OVERRIDE in workflow or repository variables."
+            echo "Could not detect SOURCE_FILE. Set SOURCE_FILE_OVERRIDE in .githubupdater.conf."
             exit 1
           fi
 
@@ -103,14 +136,77 @@ jobs:
           rm -rf "$SLUG"
           mkdir -p "$SLUG"
 
-          # Copy project files into release package without recursing into
-          # the destination folder itself.
-          rsync -a \
-            --exclude "$SLUG" \
-            --exclude ".git" \
-            --exclude ".github" \
-            --exclude ".gitignore" \
-            ./ "$SLUG/"
+          # Default excludes: things that should never ship inside a
+          # WordPress plugin/theme release zip. Patterns are matched by
+          # rsync against every path segment.
+          DEFAULT_EXCLUDES=(
+            "$SLUG"            # the destination folder itself
+            # Version control & CI
+            ".git"
+            ".github"
+            ".gitignore"
+            ".gitattributes"
+            ".gitmodules"
+            # AI assistant config / metadata
+            ".claude"          # Claude Code
+            "CLAUDE.md"
+            ".codex"           # OpenAI Codex
+            "AGENTS.md"
+            ".cursor"          # Cursor
+            ".cursorrules"
+            ".cursorignore"
+            ".aider*"          # Aider
+            ".windsurf"        # Windsurf
+            ".windsurfrules"
+            ".continue"        # Continue
+            ".gemini"          # Gemini CLI
+            "GEMINI.md"
+            "copilot-instructions.md"  # GitHub Copilot
+            ".copilot"
+            # OS & editor cruft
+            ".DS_Store"
+            "Thumbs.db"
+            ".vscode"
+            ".idea"
+            ".editorconfig"
+            # Dependency & build artefacts
+            "node_modules"
+            # Linting & testing config (dev-only)
+            "phpcs.xml"
+            "phpcs.xml.dist"
+            ".phpcs.xml.dist"
+            "phpunit.xml"
+            "phpunit.xml.dist"
+            ".phpunit.result.cache"
+            # This updater's own tooling (not part of the shipped product)
+            ".githubupdater.conf"
+            "pre-commit"
+          )
+
+          # Optional user-specified extra excludes.
+          # Set EXCLUDE_EXTRA in the workflow env or as a repository variable.
+          # Whitespace- or newline-separated rsync patterns, e.g.:
+          #   EXCLUDE_EXTRA="tests docs *.dist phpunit.xml"
+          EXTRA_EXCLUDES=()
+          if [[ -n "${EXCLUDE_EXTRA:-}" ]]; then
+            # Split on whitespace AND newlines, with globbing disabled so
+            # patterns such as *.dist are passed through to rsync verbatim
+            # instead of being expanded against the checkout.
+            set -f
+            # shellcheck disable=SC2206
+            EXTRA_EXCLUDES=( $EXCLUDE_EXTRA )
+            set +f
+          fi
+
+          # Build the rsync --exclude argument list.
+          RSYNC_EXCLUDES=()
+          for pattern in "${DEFAULT_EXCLUDES[@]}" "${EXTRA_EXCLUDES[@]}"; do
+            [[ -n "$pattern" ]] && RSYNC_EXCLUDES+=( --exclude "$pattern" )
+          done
+
+          # Copy project files into the release package without recursing
+          # into the destination folder itself.
+          rsync -a "${RSYNC_EXCLUDES[@]}" ./ "$SLUG/"
 
           zip -r "${SLUG}.zip" "$SLUG"
 
