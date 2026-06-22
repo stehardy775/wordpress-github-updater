@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.1.0 - 22/06/2026
+
+### Added
+- Per-item **"Check for updates"** control. Plugins get a "Check for updates" link in their Plugins-list row; themes get a "Check for updates" button (as an admin notice on the Themes screen, since `themes.php` has no per-row action hook). Each forces a fresh GitHub lookup for that single item and reports the result.
+- **Auto-updates support.** The managed plugin/theme is now registered in the update transient's `no_update` list when it is already current, so WordPress recognises it as coming from an update source and always shows the **"Enable auto-updates"** link — not only when an update happens to be available.
+
+### Fixed
+- A forced update check now bypasses the updater's own transient cache. WordPress's "Check Again" (and the new per-item button) previously kept serving the cached release — including the 1-minute failure marker — so a freshly published release would not appear in wp-admin until the cache expired.
+
 ## 2.0.1 - 17/06/2026
 
 ### Added

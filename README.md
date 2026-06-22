@@ -256,6 +256,23 @@ Behavior in the target project:
 
 > **Failed lookups are cached briefly.** Successful release lookups are cached for 5 minutes; failed ones (API down, rate limited, bad token) are cached for 1 minute so a broken setup doesn't slow every admin page load while you fix it. Call `clear_cache()` to force an immediate re-check.
 
+> **A forced check bypasses the cache.** WordPress's **Check Again** on the updates screen, and the per-item **Check for updates** control (below), skip the transient cache and perform a live GitHub lookup — so a freshly published release shows up immediately rather than waiting for the cache to expire.
+
+### Check for updates (per item)
+
+Each managed item gets its own on-demand check:
+
+- **Plugins** — a **Check for updates** link appears in the plugin's row on the **Plugins** screen.
+- **Themes** — a **Check for updates** button appears as a notice on the **Appearance → Themes** screen (single-site `themes.php` has no per-row action hook).
+
+Clicking it busts that item's cache, forces WordPress to rebuild its update data with a live GitHub lookup, and reports whether an update is available, the item is current, or GitHub couldn't be reached. The action is nonce-protected and requires the `update_plugins` / `update_themes` capability.
+
+### Auto-updates
+
+WordPress only shows the **Enable auto-updates** link for items it recognises as coming from an update source. The updater therefore registers the plugin/theme in the update transient's `no_update` list whenever it is already current (in `response` when an update exists). This means the **Enable auto-updates** link is always available — not only when an update happens to be pending — and WordPress can apply GitHub releases automatically once enabled.
+
+> **The updater must be constructed from the main plugin file.** Call `new GitHubUpdater( __FILE__, … )` from the file containing the `Plugin Name:` header (or the theme's `functions.php`). The action link and update injection are keyed on `plugin_basename( __FILE__ )`; constructing it from an include in a subdirectory yields a slug that doesn't match the item's row, so neither the link nor updates appear.
+
 ### Plugin Details Popup Content
 
 For the WordPress "View details" popup:
@@ -294,6 +311,8 @@ The class uses a **two-layer cache** to minimise GitHub API calls:
 | Cross-request | WordPress transient (`ghu_{md5(repo)}`) | 5 minutes | Persists across page loads; cleared automatically by WordPress's transient API |
 
 The transient key is derived from a hash of the repository name, so multiple projects targeting different repositories never share or overwrite each other's cached data.
+
+A **forced check bypasses both layers** and always performs a live lookup. This applies to WordPress's **Check Again** (`force-check`) on the updates screen and to the per-item **Check for updates** control, so a manual check never returns a stale or failure-marked cache.
 
 To force an immediate re-check (for example, right after publishing a release):
 

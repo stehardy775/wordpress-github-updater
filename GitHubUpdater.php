@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.0.1
+ * @version 2.1.0
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -61,6 +61,13 @@ class GitHubUpdater {
 
 	/** In-memory cache of the latest GitHub release data. */
 	private ?array $release_cache = null;
+
+	/**
+	 * When true, get_latest_release() bypasses the transient cache and performs
+	 * a live API call. Set while handling a per-item manual "Check for updates"
+	 * request, so a forced check never serves a stale (or failure-marked) cache.
+	 */
+	private bool $force_refresh = false;
 
 	/** In-memory cache for repository file lookups by path. */
 	private array $repo_file_cache = [];
@@ -301,9 +308,22 @@ class GitHubUpdater {
 		if ( $this->type === 'plugin' ) {
 			add_filter( 'pre_set_site_transient_update_plugins', [ $this, 'inject_plugin_update' ] );
 			add_filter( 'plugins_api', [ $this, 'plugin_info' ], 10, 3 );
+
+			// Per-plugin "Check for updates" link in the Plugins list row.
+			add_filter( 'plugin_action_links_' . $this->slug, [ $this, 'add_plugin_check_link' ] );
 		} else {
 			add_filter( 'pre_set_site_transient_update_themes', [ $this, 'inject_theme_update' ] );
+
+			// Single-site themes.php has no per-row action hook, so surface a
+			// "Check for updates" button for this theme as an admin notice.
+			add_action( 'admin_notices', [ $this, 'render_theme_check_notice' ] );
 		}
+
+		// Handles the per-item manual check (plugin link or theme button).
+		add_action( 'admin_post_' . $this->manual_check_action(), [ $this, 'handle_manual_check' ] );
+
+		// Confirmation notice shown after a manual check redirects back.
+		add_action( 'admin_notices', [ $this, 'maybe_render_checked_notice' ] );
 
 		// These two filters handle authenticated download + folder renaming
 		// for BOTH plugin and theme updates.
@@ -327,6 +347,12 @@ class GitHubUpdater {
 	 * 1 minute (see cache_failure()) so an unreachable or rate-limited API is
 	 * not re-hit on every admin page load.
 	 *
+	 * A forced check — either WordPress's "Check Again" (force-check) on the
+	 * updates screen, or our per-item "Check for updates" button — bypasses the
+	 * transient cache entirely. Without this, a manual check kept serving the
+	 * stale (or failure-marked) cache, so freshly published releases never
+	 * appeared in wp-admin until the cache expired.
+	 *
 	 * @return array|null  Decoded release object, or null on failure.
 	 */
 	private function get_latest_release(): ?array {
@@ -335,15 +361,17 @@ class GitHubUpdater {
 			return $this->release_cache;
 		}
 
-		// 2. Transient cache (across requests).
-		$cached = get_transient( $this->cache_key );
-		if ( is_array( $cached ) ) {
-			$this->release_cache = $cached;
-			return $cached;
-		}
-		if ( self::FAILURE_MARKER === $cached ) {
-			// A recent lookup failed; don't hammer the API until it expires.
-			return null;
+		// 2. Transient cache (across requests) — skipped on a forced check.
+		if ( ! $this->is_force_check() ) {
+			$cached = get_transient( $this->cache_key );
+			if ( is_array( $cached ) ) {
+				$this->release_cache = $cached;
+				return $cached;
+			}
+			if ( self::FAILURE_MARKER === $cached ) {
+				// A recent lookup failed; don't hammer the API until it expires.
+				return null;
+			}
 		}
 
 		// 3. Live API call.
@@ -422,7 +450,7 @@ class GitHubUpdater {
 			'Accept'               => $for_asset
 				? 'application/octet-stream'
 				: 'application/vnd.github+json',
-			'User-Agent'           => 'WordPress-GitHubUpdater/2.0.1',
+			'User-Agent'           => 'WordPress-GitHubUpdater/2.1.0',
 			'X-GitHub-Api-Version' => '2022-11-28',
 		];
 	}
@@ -432,44 +460,50 @@ class GitHubUpdater {
 	// =========================================================================
 
 	/**
-	 * Injects update information into the plugin update transient when a newer
-	 * release exists on GitHub.
+	 * Injects update information into the plugin update transient.
+	 *
+	 * When a newer release exists it is added to ->response so WordPress offers
+	 * the update. Otherwise the plugin is registered in ->no_update. Either way
+	 * WordPress sees the plugin as coming from a known update source, which is
+	 * what makes the "Enable auto-updates" link appear — even when the plugin
+	 * is already up to date or GitHub is briefly unreachable.
 	 */
 	public function inject_plugin_update( object $transient ): object {
 		if ( empty( $transient->checked ) ) {
 			return $transient;
 		}
 
-		$release = $this->get_latest_release();
-		if ( ! $release ) {
-			return $transient;
+		$release    = $this->get_latest_release();
+		$latest     = $release ? $this->tag_to_version( $release['tag_name'] ) : $this->current_version;
+		$has_update = $release && version_compare( $latest, $this->current_version, '>' );
+
+		$data = [
+			'id'           => "github.com/{$this->repo}",
+			'slug'         => dirname( $this->slug ),
+			'plugin'       => $this->slug,
+			'new_version'  => $has_update ? $latest : $this->current_version,
+			'package'      => $release ? $this->download_url( $release ) : '',
+			'url'          => "https://github.com/{$this->repo}",
+			'icons'        => [],
+			'banners'      => [],
+			'banners_rtl'  => [],
+		];
+
+		// Only advertise compatibility values that are actually declared
+		// in the plugin header, so nothing is invented or hard-coded.
+		if ( $this->tested_wp !== '' ) {
+			$data['tested'] = $this->tested_wp;
+		}
+		if ( $this->requires_php !== '' ) {
+			$data['requires_php'] = $this->requires_php;
 		}
 
-		$latest = $this->tag_to_version( $release['tag_name'] );
-
-		if ( version_compare( $latest, $this->current_version, '>' ) ) {
-			$data = [
-				'id'           => "github.com/{$this->repo}",
-				'slug'         => dirname( $this->slug ),
-				'plugin'       => $this->slug,
-				'new_version'  => $latest,
-				'package'      => $this->download_url( $release ),
-				'url'          => "https://github.com/{$this->repo}",
-				'icons'        => [],
-				'banners'      => [],
-				'banners_rtl'  => [],
-			];
-
-			// Only advertise compatibility values that are actually declared
-			// in the plugin header, so nothing is invented or hard-coded.
-			if ( $this->tested_wp !== '' ) {
-				$data['tested'] = $this->tested_wp;
-			}
-			if ( $this->requires_php !== '' ) {
-				$data['requires_php'] = $this->requires_php;
-			}
-
+		if ( $has_update ) {
+			unset( $transient->no_update[ $this->slug ] );
 			$transient->response[ $this->slug ] = (object) $data;
+		} else {
+			unset( $transient->response[ $this->slug ] );
+			$transient->no_update[ $this->slug ] = (object) $data;
 		}
 
 		return $transient;
@@ -524,39 +558,43 @@ class GitHubUpdater {
 	// =========================================================================
 
 	/**
-	 * Injects update information into the theme update transient when a newer
-	 * release exists on GitHub.
+	 * Injects update information into the theme update transient.
+	 *
+	 * As with plugins, a newer release goes into ->response and an up-to-date
+	 * theme is registered in ->no_update, so WordPress always recognises the
+	 * theme as managed and shows the "Enable auto-updates" link.
 	 */
 	public function inject_theme_update( object $transient ): object {
 		if ( empty( $transient->checked ) ) {
 			return $transient;
 		}
 
-		$release = $this->get_latest_release();
-		if ( ! $release ) {
-			return $transient;
+		$release    = $this->get_latest_release();
+		$latest     = $release ? $this->tag_to_version( $release['tag_name'] ) : $this->current_version;
+		$has_update = $release && version_compare( $latest, $this->current_version, '>' );
+
+		$data = [
+			'theme'       => $this->slug,
+			'new_version' => $has_update ? $latest : $this->current_version,
+			'package'     => $release ? $this->download_url( $release ) : '',
+			'url'         => "https://github.com/{$this->repo}",
+		];
+
+		// Only advertise compatibility values declared in the theme's
+		// style.css headers, rather than hard-coded defaults.
+		if ( $this->requires_wp !== '' ) {
+			$data['requires'] = $this->requires_wp;
+		}
+		if ( $this->requires_php !== '' ) {
+			$data['requires_php'] = $this->requires_php;
 		}
 
-		$latest = $this->tag_to_version( $release['tag_name'] );
-
-		if ( version_compare( $latest, $this->current_version, '>' ) ) {
-			$data = [
-				'theme'       => $this->slug,
-				'new_version' => $latest,
-				'package'     => $this->download_url( $release ),
-				'url'         => "https://github.com/{$this->repo}",
-			];
-
-			// Only advertise compatibility values declared in the theme's
-			// style.css headers, rather than hard-coded defaults.
-			if ( $this->requires_wp !== '' ) {
-				$data['requires'] = $this->requires_wp;
-			}
-			if ( $this->requires_php !== '' ) {
-				$data['requires_php'] = $this->requires_php;
-			}
-
+		if ( $has_update ) {
+			unset( $transient->no_update[ $this->slug ] );
 			$transient->response[ $this->slug ] = $data;
+		} else {
+			unset( $transient->response[ $this->slug ] );
+			$transient->no_update[ $this->slug ] = $data;
 		}
 
 		return $transient;
@@ -693,6 +731,144 @@ class GitHubUpdater {
 		}
 
 		return isset( $hook_extra['theme'] ) && $hook_extra['theme'] === $this->slug;
+	}
+
+	// =========================================================================
+	// Manual "Check for updates" (per item)
+	// =========================================================================
+
+	/**
+	 * Returns true when the current request is a forced update check, so the
+	 * transient cache should be bypassed. Covers both WordPress's native
+	 * "Check Again" (force-check) and our own per-item manual check.
+	 */
+	private function is_force_check(): bool {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only presence check of WordPress's own param.
+		return $this->force_refresh || isset( $_GET['force-check'] );
+	}
+
+	/**
+	 * Unique admin-post action name for this plugin/theme's manual check.
+	 * Derived from the slug so each managed item has its own endpoint.
+	 */
+	private function manual_check_action(): string {
+		return 'ghu_check_' . md5( $this->slug );
+	}
+
+	/**
+	 * Nonce-protected URL that triggers a manual check for this item.
+	 */
+	private function manual_check_url(): string {
+		return wp_nonce_url(
+			admin_url( 'admin-post.php?action=' . $this->manual_check_action() ),
+			$this->manual_check_action()
+		);
+	}
+
+	/**
+	 * Adds a "Check for updates" link to this plugin's row on the Plugins screen.
+	 */
+	public function add_plugin_check_link( array $links ): array {
+		$links['ghu_check'] = sprintf(
+			'<a href="%s">%s</a>',
+			esc_url( $this->manual_check_url() ),
+			esc_html( 'Check for updates' )
+		);
+
+		return $links;
+	}
+
+	/**
+	 * Renders a "Check for updates" button for this theme on the Themes screen.
+	 *
+	 * themes.php has no per-row action hook on single sites, so the control is
+	 * surfaced as an admin notice. Only the active theme's functions.php runs,
+	 * so in practice this appears once per managed theme.
+	 */
+	public function render_theme_check_notice(): void {
+		$screen = get_current_screen();
+		if ( ! $screen || 'themes' !== $screen->id || ! current_user_can( 'update_themes' ) ) {
+			return;
+		}
+
+		printf(
+			'<div class="notice notice-info"><p>%s &nbsp;<a class="button" href="%s">%s</a></p></div>',
+			esc_html( sprintf( '%s (GitHub):', $this->display_name ) ),
+			esc_url( $this->manual_check_url() ),
+			esc_html( 'Check for updates' )
+		);
+	}
+
+	/**
+	 * Handles a per-item manual check: busts this item's cache, forces
+	 * WordPress to rebuild its update transient (which re-runs our injection
+	 * with a live GitHub lookup), then redirects back with a confirmation.
+	 */
+	public function handle_manual_check(): void {
+		$capability = ( 'plugin' === $this->type ) ? 'update_plugins' : 'update_themes';
+
+		if ( ! current_user_can( $capability ) ) {
+			wp_die( esc_html( 'You do not have permission to check for updates.' ) );
+		}
+
+		check_admin_referer( $this->manual_check_action() );
+
+		// Bypass our cache for the lookup triggered by the refresh below.
+		$this->clear_cache();
+		$this->force_refresh = true;
+
+		if ( 'plugin' === $this->type ) {
+			delete_site_transient( 'update_plugins' );
+			wp_update_plugins();
+			$redirect = self_admin_url( 'plugins.php' );
+		} else {
+			delete_site_transient( 'update_themes' );
+			wp_update_themes();
+			$redirect = self_admin_url( 'themes.php' );
+		}
+
+		$redirect = add_query_arg( 'ghu_checked', rawurlencode( $this->slug ), $redirect );
+
+		wp_safe_redirect( $redirect );
+		exit;
+	}
+
+	/**
+	 * After a manual check redirects back, shows whether an update was found,
+	 * the item is current, or GitHub could not be reached. Only the instance
+	 * whose slug matches the request renders its notice.
+	 */
+	public function maybe_render_checked_notice(): void {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only, compared against a known slug.
+		if ( ! isset( $_GET['ghu_checked'] ) ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$checked = sanitize_text_field( wp_unslash( $_GET['ghu_checked'] ) );
+		if ( $checked !== $this->slug ) {
+			return;
+		}
+
+		$release = $this->get_latest_release();
+		$latest  = $release ? $this->tag_to_version( $release['tag_name'] ) : null;
+
+		if ( null === $latest ) {
+			$type    = 'error';
+			$message = sprintf( '%s: could not reach GitHub to check for updates.', $this->display_name );
+		} elseif ( version_compare( $latest, $this->current_version, '>' ) ) {
+			$type    = 'success';
+			$message = sprintf( '%1$s: version %2$s is available (you have %3$s).', $this->display_name, $latest, $this->current_version );
+		} else {
+			$type    = 'success';
+			$message = sprintf( '%1$s is up to date (%2$s).', $this->display_name, $this->current_version );
+		}
+
+		printf(
+			'<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>',
+			esc_attr( $type ),
+			esc_html( $message )
+		);
 	}
 
 	// =========================================================================
