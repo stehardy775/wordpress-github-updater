@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.2.1 - 24/06/2026
+
+### Fixed
+- Resolved missing dependancy in proxy requirements.txt
+
 ## 2.2.0 - 24/06/2026
 
 ### Added
