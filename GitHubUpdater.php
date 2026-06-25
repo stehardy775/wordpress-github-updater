@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.1.0
+ * @version 2.2.0
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -25,8 +25,35 @@ class GitHubUpdater {
 	/** Repository identifier: "owner/repo". */
 	private string $repo;
 
-	/** GitHub Fine-Grained Personal Access Token. */
-	private string $token;
+	/**
+	 * GitHub Fine-Grained Personal Access Token.
+	 *
+	 * Only used in direct mode (a token string passed to the constructor).
+	 * In proxy mode this stays empty — the token lives on the proxy server,
+	 * never in the shipped plugin/theme — and $proxy is set instead.
+	 */
+	private string $token = '';
+
+	/**
+	 * Base URL of the update proxy (e.g. "https://updates.example.com"),
+	 * or '' when talking to GitHub directly.
+	 *
+	 * In proxy mode the plugin sends no credentials: the proxy holds the
+	 * GitHub token server-side and authenticates the GitHub call itself, so
+	 * nothing secret is embedded in the distributed plugin/theme. Each request
+	 * carries an X-GHU-Site header (the site URL) so the proxy can log which
+	 * domain pulled which package.
+	 */
+	private string $proxy = '';
+
+	/**
+	 * Optional shared secret for proxy mode, sent as the X-GHU-Key header.
+	 * When the proxy is configured with a matching secret it rejects requests
+	 * without it, so only your plugins/themes can use the proxy. This is not a
+	 * GitHub credential — at worst a leaked value lets someone pull your
+	 * release zips, not read your repos directly.
+	 */
+	private string $proxy_secret = '';
 
 	/**
 	 * Optional release asset filename to download (e.g. "my-plugin.zip").
@@ -83,21 +110,44 @@ class GitHubUpdater {
 	// =========================================================================
 
 	/**
-	 * @param string $file  Absolute path to the plugin main file or theme functions.php.
-	 * @param string $repo  GitHub repository in "owner/repo" format.
-	 * @param string $token GitHub Fine-Grained Personal Access Token.
-	 * @param string $asset Optional release asset to download instead of the
+	 * @param string       $file  Absolute path to the plugin main file or theme functions.php.
+	 * @param string       $repo  GitHub repository in "owner/repo" format.
+	 * @param string|array $auth  How the updater reaches GitHub. Two forms:
+	 *
+	 *   Proxy mode (recommended for private repos):
+	 *       [ 'proxy' => 'https://updates.example.com' ]
+	 *   The GitHub token lives on the proxy server, never in the shipped
+	 *   plugin/theme. Nothing secret is distributed.
+	 *
+	 *   Direct mode (legacy):
+	 *       'github_pat_xxxx'
+	 *   A GitHub Fine-Grained Personal Access Token passed as a plain string.
+	 *   The token is embedded in the plugin/theme file, so anyone who can read
+	 *   the files can read the token — only use this for repos whose exposure
+	 *   you accept.
+	 *
+	 * @param string       $asset Optional release asset to download instead of the
 	 *                      auto-generated source zipball. A path such as
 	 *                      "dist/my-plugin.zip" is accepted — only the filename
 	 *                      is used, since GitHub stores assets by filename.
 	 *                      Leave empty to use GitHub's source zipball.
 	 */
-	public function __construct( string $file, string $repo, string $token, string $asset = '' ) {
+	public function __construct( string $file, string $repo, string|array $auth, string $asset = '' ) {
 		$this->file      = $file;
 		$this->repo      = $repo;
-		$this->token     = $token;
 		$this->asset     = basename( $asset );
 		$this->cache_key = 'ghu_' . md5( $repo );
+
+		if ( is_array( $auth ) ) {
+			// Proxy mode. A token may also be supplied here, but doing so
+			// re-embeds the secret and defeats the point — prefer 'proxy' only.
+			$this->proxy        = rtrim( (string) ( $auth['proxy'] ?? '' ), '/' );
+			$this->proxy_secret = (string) ( $auth['secret'] ?? '' );
+			$this->token        = (string) ( $auth['token'] ?? '' );
+		} else {
+			// Direct mode: a bare token string.
+			$this->token = $auth;
+		}
 
 		$this->detect_type_and_slug();
 
@@ -164,7 +214,10 @@ class GitHubUpdater {
 		}
 
 		$response = wp_remote_get(
-			"https://api.github.com/repos/{$this->repo}/contents/{$path}",
+			$this->endpoint(
+				"https://api.github.com/repos/{$this->repo}/contents/{$path}",
+				[ 'ghu' => 'contents', 'path' => $path ]
+			),
 			[
 				'headers' => $this->api_headers(),
 				'timeout' => 10,
@@ -376,7 +429,10 @@ class GitHubUpdater {
 
 		// 3. Live API call.
 		$response = wp_remote_get(
-			"https://api.github.com/repos/{$this->repo}/releases/latest",
+			$this->endpoint(
+				"https://api.github.com/repos/{$this->repo}/releases/latest",
+				[ 'ghu' => 'release' ]
+			),
 			[
 				'headers' => $this->api_headers(),
 				'timeout' => 10,
@@ -427,6 +483,17 @@ class GitHubUpdater {
 	 * release, GitHub's auto-generated source zipball is used instead.
 	 */
 	private function download_url( array $release ): string {
+		// Proxy mode: hand WordPress a proxy URL keyed by tag (and asset name,
+		// if any). The proxy resolves the asset/zipball and authenticates the
+		// GitHub download itself, so no GitHub URL or token is exposed here.
+		if ( $this->proxy !== '' ) {
+			$query = [ 'ghu' => 'download', 'repo' => $this->repo, 'tag' => $release['tag_name'] ];
+			if ( $this->asset !== '' ) {
+				$query['asset'] = $this->asset;
+			}
+			return add_query_arg( $query, trailingslashit( $this->proxy ) );
+		}
+
 		if ( $this->asset !== '' ) {
 			foreach ( $release['assets'] ?? [] as $asset ) {
 				if ( $asset['name'] === $this->asset ) {
@@ -440,17 +507,54 @@ class GitHubUpdater {
 	}
 
 	/**
-	 * Returns the HTTP headers required for a GitHub API request.
+	 * Resolves the URL to request for a given GitHub endpoint.
 	 *
-	 * @param bool $for_asset  Pass true when downloading a release asset binary.
+	 * Direct mode returns $github_url unchanged. Proxy mode returns a URL on
+	 * the proxy carrying $proxy_query plus the repo, e.g.
+	 * "https://updates.example.com/?ghu=release&repo=owner/repo". The proxy
+	 * uses a single entry point (index.php as the default document), so no
+	 * URL-rewrite configuration is needed on the host.
+	 */
+	private function endpoint( string $github_url, array $proxy_query ): string {
+		if ( $this->proxy === '' ) {
+			return $github_url;
+		}
+
+		return add_query_arg(
+			array_merge( [ 'repo' => $this->repo ], $proxy_query ),
+			trailingslashit( $this->proxy )
+		);
+	}
+
+	/**
+	 * Returns the HTTP headers for an update request.
+	 *
+	 * Direct mode authenticates to GitHub with the embedded token. Proxy mode
+	 * sends no credentials — the proxy authenticates server-side — and instead
+	 * identifies the calling site via X-GHU-Site so the proxy can log which
+	 * domain pulled which package.
+	 *
+	 * @param bool $for_asset  Pass true when downloading a release binary.
 	 */
 	private function api_headers( bool $for_asset = false ): array {
+		$accept = $for_asset ? 'application/octet-stream' : 'application/vnd.github+json';
+
+		if ( $this->proxy !== '' ) {
+			$headers = [
+				'Accept'     => $accept,
+				'User-Agent' => 'WordPress-GitHubUpdater/2.2.0',
+				'X-GHU-Site' => home_url(),
+			];
+			if ( $this->proxy_secret !== '' ) {
+				$headers['X-GHU-Key'] = $this->proxy_secret;
+			}
+			return $headers;
+		}
+
 		return [
 			'Authorization'        => "Bearer {$this->token}",
-			'Accept'               => $for_asset
-				? 'application/octet-stream'
-				: 'application/vnd.github+json',
-			'User-Agent'           => 'WordPress-GitHubUpdater/2.1.0',
+			'Accept'               => $accept,
+			'User-Agent'           => 'WordPress-GitHubUpdater/2.2.0',
 			'X-GitHub-Api-Version' => '2022-11-28',
 		];
 	}
@@ -628,7 +732,9 @@ class GitHubUpdater {
 		}
 
 		// Release assets use a different Accept header than the source zipball.
-		$is_asset = str_contains( $package, '/releases/assets/' );
+		// In proxy mode the proxy always streams back a binary, so treat it as
+		// an asset download regardless of the URL shape.
+		$is_asset = $this->proxy !== '' || str_contains( $package, '/releases/assets/' );
 		$tmp_file  = wp_tempnam( 'github-update' );
 
 		$response = wp_remote_get(
@@ -675,6 +781,12 @@ class GitHubUpdater {
 	 * (e.g. "me/plugin" must not match "me/plugin-pro").
 	 */
 	private function is_our_package( string $url ): bool {
+		// Proxy mode: our packages are download URLs on the proxy host.
+		if ( $this->proxy !== '' ) {
+			return str_starts_with( $url, trailingslashit( $this->proxy ) )
+				&& str_contains( $url, 'ghu=download' );
+		}
+
 		return str_contains( $url, "://api.github.com/repos/{$this->repo}/" )
 			|| str_contains( $url, "://github.com/{$this->repo}/" );
 	}

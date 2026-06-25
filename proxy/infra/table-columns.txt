@@ -1,0 +1,13 @@
+# Columns for the GhuRequests_CL custom table (DCR-based).
+# Used by the `az monitor log-analytics workspace table create --columns` step
+# in README.md. TimeGenerated is required by Log Analytics.
+
+TimeGenerated=datetime
+SiteDomain=string
+Repo=string
+Action=string
+Asset=string
+Tag=string
+Status=int
+ClientIp=string
+UserAgent=string

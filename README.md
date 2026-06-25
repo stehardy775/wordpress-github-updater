@@ -91,7 +91,35 @@ Each writes the latest files to the configured destinations (or the defaults: `i
 
 ## Usage
 
-Add the following to your main plugin file or theme's `functions.php`:
+Add the following to your main plugin file or theme's `functions.php`. There
+are two ways to authenticate to GitHub — pick one:
+
+### Option A — Update proxy (recommended for private repos)
+
+The plugin talks to a small proxy **you** host; the proxy holds the GitHub
+token server-side. Nothing secret is embedded in the distributed plugin/theme,
+the token rotates in one place, and each request is logged (which site pulled
+which package). See [`proxy/`](proxy/README.md) for the proxy and a step-by-step
+**Azure Web App** deployment guide.
+
+```php
+require_once __DIR__ . '/includes/GitHubUpdater.php';
+new GitHubUpdater( __FILE__, '{owner}/{repo-name}', [
+    'proxy'  => 'https://your-proxy.azurewebsites.net',
+    'secret' => 'your-shared-secret', // optional; must match the proxy's GHU_SHARED_SECRET
+] );
+```
+
+The optional `secret` is sent as an `X-GHU-Key` header so only your
+plugins/themes can use the proxy. It is **not** a GitHub credential — at worst a
+leaked value lets someone pull your release zips, not read your repos.
+
+### Option B — Embed a token directly (legacy)
+
+The third argument can instead be a GitHub token string. This is simpler but
+**embeds the token in the plugin/theme file** — anyone who can read the files
+can read the token. Only use this for repos whose exposure you accept (see the
+[Security note](#github-token-setup)).
 
 ```php
 require_once __DIR__ . '/includes/GitHubUpdater.php';
@@ -117,18 +145,26 @@ The arguments are:
 |---|---|---|
 | `$file` | Yes | Absolute path to the plugin's main file or theme's `functions.php`. Use `__FILE__`. |
 | `$repo` | Yes | GitHub repository in `owner/repo` format. |
-| `$token` | Yes | A GitHub Fine-Grained Personal Access Token (see below). |
+| `$auth` | Yes | Either `[ 'proxy' => 'https://…', 'secret' => '…' ]` (Option A — recommended; `secret` optional) **or** a GitHub Fine-Grained Personal Access Token string (Option B). |
 | `$asset` | No | Filename of the release asset to install (e.g. `my-plugin.zip`). A path such as `dist/my-plugin.zip` is accepted — only the filename is used. Leave empty (the default) to install GitHub's auto-generated source zipball. See [Which zip gets installed?](#which-zip-gets-installed). |
 
-To install a specific attached zip instead of the source zipball:
+To install a specific attached zip instead of the source zipball, pass `$asset`
+as the fourth argument (works with either auth option):
 
 ```php
+// Proxy mode:
+new GitHubUpdater( __FILE__, '{owner}/{repo-name}', [ 'proxy' => 'https://your-proxy.azurewebsites.net' ], 'my-plugin.zip' );
+
+// Direct token mode:
 new GitHubUpdater( __FILE__, '{owner}/{repo-name}', MY_GITHUB_TOKEN, 'my-plugin.zip' );
 ```
 
 ---
 
 ## GitHub Token Setup
+
+A token is required either way — with the proxy it lives on the proxy server;
+with direct mode it lives in the plugin/theme file.
 
 1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**.
 2. Click **Generate new token**.
@@ -137,13 +173,30 @@ new GitHubUpdater( __FILE__, '{owner}/{repo-name}', MY_GITHUB_TOKEN, 'my-plugin.
 5. Under **Repository permissions**, grant:
    - **Contents** → Read-only
    - **Metadata** → Read-only *(selected automatically)*
-6. Copy the generated token and pass it as the third argument.
+6. Use the token in one of two places:
+   - **Proxy (recommended):** set it as the `GITHUB_TOKEN` App Setting on the proxy. See [`proxy/`](proxy/README.md).
+   - **Direct mode:** pass it as the third constructor argument.
 
-> **Security note:** Store the token in a PHP constant or environment variable rather than hardcoding it in a shared file.
+> **Why the proxy is more secure.** A GitHub PAT is a bearer secret: anyone who
+> holds it can read your private repos. In direct mode the token ships inside
+> the plugin/theme to every site that installs it — in plaintext, and possibly
+> in backups or version control. Obfuscating or "encrypting" it in the file
+> doesn't help, because the key to decrypt it has to ship alongside it.
+>
+> The proxy keeps the token server-side, so the distributed plugin/theme
+> contains only a non-secret URL. You rotate the token in one place, bound what
+> it can serve with an allowlist, and get a log of which sites pulled which
+> package.
+
+> **If you do use direct mode**, at least store the token in a PHP constant
+> defined outside the shared file rather than inline:
 >
 > ```php
 > new GitHubUpdater( __FILE__, '{owner}/{repo-name}', MY_GITHUB_TOKEN );
 > ```
+>
+> This still ships the secret to every install — it only avoids repeating it —
+> so prefer the proxy whenever the repo must stay private.
 
 ---
 
@@ -247,10 +300,14 @@ Behavior in the target project:
 ## How It Works
 
 1. On admin page loads, `pre_set_site_transient_update_plugins` (or `_update_themes`) is hooked.
-2. The latest release is fetched from `https://api.github.com/repos/{owner}/{repo}/releases/latest`.
+2. The latest release is fetched — directly from `https://api.github.com/repos/{owner}/{repo}/releases/latest` in direct mode, or via the proxy (`…/?ghu=release&repo={owner}/{repo}`) in proxy mode.
 3. If the release tag is newer than the installed version, WordPress is told an update is available.
-4. When the user clicks **Update**, `upgrader_pre_download` intercepts the download and injects the `Authorization` header so private repositories are accessible.
+4. When the user clicks **Update**, `upgrader_pre_download` intercepts the download. In direct mode it injects the `Authorization` header; in proxy mode it requests the proxy's download endpoint, which authenticates to GitHub server-side. Either way private repositories are accessible.
 5. After extraction, `upgrader_source_selection` renames the randomly-named GitHub folder to the correct slug.
+
+In **proxy mode** the plugin never sees the GitHub token: it sends only its
+site URL (via `X-GHU-Site`), and the proxy attaches the token and logs the
+request. See [`proxy/README.md`](proxy/README.md).
 
 > **Pre-releases and drafts are ignored.** The `/releases/latest` endpoint only returns the most recent **published, non-prerelease** release. Tags marked as a *draft* or *pre-release* on GitHub (e.g. `v1.2.3-beta`) will not trigger a WordPress update — publish a normal release when you want users to receive it.
 
@@ -317,7 +374,7 @@ A **forced check bypasses both layers** and always performs a live lookup. This 
 To force an immediate re-check (for example, right after publishing a release):
 
 ```php
-$updater = new GitHubUpdater( __FILE__, 'your-org/your-repo', MY_GITHUB_TOKEN );
+$updater = new GitHubUpdater( __FILE__, 'your-org/your-repo', [ 'proxy' => 'https://your-proxy.azurewebsites.net' ] );
 $updater->clear_cache();
 ```
 

@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.2.0 - 24/06/2026
+
+### Added
+- **Update-proxy mode** for private repositories. The third constructor argument now accepts `[ 'proxy' => 'https://…', 'secret' => '…' ]` instead of a token. In proxy mode the plugin sends no GitHub credentials — the token lives only on the proxy server, so nothing secret is embedded in the distributed plugin/theme. Each request carries an `X-GHU-Site` header (for logging) and, when configured, an `X-GHU-Key` shared-secret header.
+- A self-contained proxy under [`proxy/`](proxy/README.md): a FastAPI (Python) app with a single `?ghu=`-routed entry point (no URL-rewrite config required) and streaming package downloads.
+  - **Logging** to a Log Analytics custom table via managed identity (`app/logger.py`).
+  - **Admin UI** (`app/admin.py`) behind App Service Easy Auth (Entra): a dashboard reviewing logs and a settings page managing the blocklist.
+  - **Domain/repo blocklist** in Azure Table Storage (`app/blocklist.py`) to cut off a specific site or repo; wildcards (`*`) supported, fails open.
+  - **Shared-secret gate** (`X-GHU-Key`) so only your plugins/themes can use the proxy.
+  - Versioned `startup.sh` and a step-by-step Azure App Service deployment guide.
+
+### Changed
+- The constructor's third parameter is now `string|array $auth`. Passing a token string keeps the previous behaviour (direct GitHub access), so existing setups are unaffected; passing an array enables proxy mode.
+
 ## 2.1.0 - 22/06/2026
 
 ### Added

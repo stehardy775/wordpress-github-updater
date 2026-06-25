@@ -1,0 +1,84 @@
+name: Proxy Dependency Audit
+
+on:
+  push:
+    paths:
+      - 'proxy/**'
+      - '.github/workflows/proxy-dependency-audit.yml'
+      - '.github/scripts/pip_audit_to_sarif.py'
+  pull_request:
+    paths:
+      - 'proxy/**'
+      - '.github/workflows/proxy-dependency-audit.yml'
+      - '.github/scripts/pip_audit_to_sarif.py'
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dependency-health:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: proxy
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: Run pip-audit (JSON)
+        id: pip_audit
+        run: |
+          set +e
+          pip-audit -r requirements.txt -f json -o pip-audit.json
+          echo "audit_exit=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Convert pip-audit JSON to SARIF
+        if: always()
+        run: |
+          python ../.github/scripts/pip_audit_to_sarif.py \
+            pip-audit.json requirements.txt pip-audit.sarif proxy/requirements.txt
+
+      - name: Upload pip-audit results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: proxy/pip-audit.sarif
+
+      - name: Report outdated packages (informational)
+        if: always()
+        run: |
+          python -m pip list --outdated --format=json > outdated.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("outdated.json").read_text(encoding="utf-8"))
+          if not data:
+              print("All installed packages are up to date.")
+          else:
+              print("Outdated packages:")
+              for item in data:
+                  print(f"- {item['name']}: {item['version']} -> {item['latest_version']}")
+          PY
+
+      - name: Fail if vulnerabilities were found
+        if: steps.pip_audit.outputs.audit_exit != '0'
+        run: |
+          echo "pip-audit found vulnerable dependencies. Review the code scanning alerts and update requirements.txt."
+          exit 1

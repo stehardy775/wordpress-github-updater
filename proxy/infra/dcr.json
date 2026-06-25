@@ -1,0 +1,37 @@
+{
+  "location": "<REGION>",
+  "properties": {
+    "dataCollectionEndpointId": "<DCE_RESOURCE_ID>",
+    "streamDeclarations": {
+      "Custom-GhuRequests_CL": {
+        "columns": [
+          { "name": "TimeGenerated", "type": "datetime" },
+          { "name": "SiteDomain", "type": "string" },
+          { "name": "Repo", "type": "string" },
+          { "name": "Action", "type": "string" },
+          { "name": "Asset", "type": "string" },
+          { "name": "Tag", "type": "string" },
+          { "name": "Status", "type": "int" },
+          { "name": "ClientIp", "type": "string" },
+          { "name": "UserAgent", "type": "string" }
+        ]
+      }
+    },
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "<WORKSPACE_RESOURCE_ID>",
+          "name": "laDestination"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": [ "Custom-GhuRequests_CL" ],
+        "destinations": [ "laDestination" ],
+        "transformKql": "source",
+        "outputStream": "Custom-GhuRequests_CL"
+      }
+    ]
+  }
+}
