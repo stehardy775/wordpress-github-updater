@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.3.0
+ * @version 2.3.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -951,7 +951,7 @@ class GitHubUpdater {
 
 		printf(
 			'<div class="notice notice-info"><p>%s &nbsp;<a class="button" href="%s">%s</a></p></div>',
-			esc_html( sprintf( '%s (GitHub):', $this->display_name ) ),
+			esc_html( sprintf( 'Check for Updates: %s', $this->display_name ) ),
 			esc_url( $this->manual_check_url() ),
 			esc_html( 'Check for updates' )
 		);

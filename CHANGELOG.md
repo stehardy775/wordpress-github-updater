@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 2.3.1 - 29th June 2026
+
+### Added
+- Added package resolution to the Proxy Service
+
 ## 2.3.0 - 29th June 2026
 
 ### Fixed

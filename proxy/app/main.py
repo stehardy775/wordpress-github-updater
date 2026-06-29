@@ -114,6 +114,30 @@ async def _handle_contents(request: Request, repo: str, path: str) -> Response:
     return _passthrough_json(status, body, bg)
 
 
+def _auto_select_asset(repo: str, assets: list) -> str:
+    """Picks the curated release zip when the caller names no asset.
+
+    Mirrors the plugin-side GitHubUpdater::resolve_asset_name(): GitHub's source
+    zipball is never listed among a release's assets, so any match here is a
+    genuine uploaded zip. Prefer "<repo-name>.zip"; failing that, the sole
+    attached zip. Returns "" (use the source zipball) when nothing suitable is
+    attached, or when several zips are attached and none matches the repo name
+    — an ambiguous choice the caller must resolve by naming the asset.
+    """
+    zips = [
+        name
+        for candidate in assets
+        for name in [candidate.get("name", "")]
+        if name.lower().endswith(".zip")
+    ]
+    if not zips:
+        return ""
+    repo_zip = f"{repo.split('/')[-1]}.zip"
+    if repo_zip in zips:
+        return repo_zip
+    return zips[0] if len(zips) == 1 else ""
+
+
 async def _handle_download(request: Request, repo: str, tag: str, asset: str) -> Response:
     if not tag:
         return _err(400, "Missing tag")
@@ -125,22 +149,30 @@ async def _handle_download(request: Request, repo: str, tag: str, asset: str) ->
         return JSONResponse({"error": "Could not resolve release"}, status_code=502, background=bg)
 
     release = json.loads(body or "{}")
+    assets = release.get("assets") if isinstance(release.get("assets"), list) else []
+
+    # When the caller names no asset, auto-select the curated zip the release
+    # workflow attaches (built with the packaging excludes applied). This lets
+    # plugins/themes whose bundled updater still sends no asset name receive the
+    # clean package instead of the raw source zipball, without each site first
+    # having to update its own copy of GitHubUpdater.php.
+    effective_asset = asset or _auto_select_asset(repo, assets)
+
     asset_url = ""
     filename = f"{repo.split('/')[-1]}-{tag}.zip"
 
-    # Prefer the named asset; otherwise fall back to the source zipball.
-    if asset and isinstance(release.get("assets"), list):
-        for candidate in release["assets"]:
-            if candidate.get("name") == asset:
+    if effective_asset:
+        for candidate in assets:
+            if candidate.get("name") == effective_asset:
                 asset_url = candidate.get("url", "")
-                filename = asset
+                filename = effective_asset
                 break
 
     is_asset = bool(asset_url)
     url = asset_url if is_asset else f"{GITHUB_API}/repos/{repo}/zipball/{quote(tag, safe='')}"
     accept = "application/octet-stream" if is_asset else "application/vnd.github+json"
 
-    return await _stream_zip(request, url, _gh_headers(accept), filename, repo, asset, tag)
+    return await _stream_zip(request, url, _gh_headers(accept), filename, repo, effective_asset, tag)
 
 
 # ---------------------------------------------------------------------------
