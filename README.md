@@ -146,10 +146,10 @@ The arguments are:
 | `$file` | Yes | Absolute path to the plugin's main file or theme's `functions.php`. Use `__FILE__`. |
 | `$repo` | Yes | GitHub repository in `owner/repo` format. |
 | `$auth` | Yes | Either `[ 'proxy' => 'https://…', 'secret' => '…' ]` (Option A — recommended; `secret` optional) **or** a GitHub Fine-Grained Personal Access Token string (Option B). |
-| `$asset` | No | Filename of the release asset to install (e.g. `my-plugin.zip`). A path such as `dist/my-plugin.zip` is accepted — only the filename is used. Leave empty (the default) to install GitHub's auto-generated source zipball. See [Which zip gets installed?](#which-zip-gets-installed). |
+| `$asset` | No | Filename of the release asset to install (e.g. `my-plugin.zip`). A path such as `dist/my-plugin.zip` is accepted — only the filename is used. Leave empty (the default) to install the curated zip the release workflow attaches, falling back to GitHub's source zipball if none is attached. See [Which zip gets installed?](#which-zip-gets-installed). |
 
-To install a specific attached zip instead of the source zipball, pass `$asset`
-as the fourth argument (works with either auth option):
+To force a specific attached zip, pass `$asset` as the fourth argument (works
+with either auth option):
 
 ```php
 // Proxy mode:
@@ -212,14 +212,14 @@ with direct mode it lives in the plugin/theme file.
 When WordPress installs an update, the updater chooses the package based on the optional `$asset` constructor argument ([`download_url()`](GitHubUpdater.php)):
 
 - **`$asset` set** (e.g. `'my-plugin.zip'`): the updater installs the release asset with that filename, giving you full control over the archive contents. If no asset with that name exists on the release, it safely falls back to the source zipball.
-- **`$asset` empty** (the default): the updater installs GitHub's **auto-generated source zipball** — no need to attach or build anything.
+- **`$asset` empty** (the default): the updater installs the **curated zip the release workflow attaches** — built with the [default excludes](#default-packaging-excludes) and your `EXCLUDE_EXTRA` applied — so users never receive the raw repo (`.github`, `AGENTS.md`, etc.). The asset is discovered from the release, not reconstructed by name (the constructor can't see `SLUG_OVERRIDE`): the updater prefers `<repo-name>.zip`, otherwise the single attached zip. If no zip is attached, it falls back to GitHub's auto-generated source zipball.
 
-There is no auto-guessing of which attached zip to use: the package is either the asset you name or the source zipball. This makes the behaviour predictable when a release carries several assets (e.g. zip + checksums + screenshots).
+The source zipball is never listed among a release's assets, so the auto-selection only ever picks a genuine uploaded zip. When several zips are attached and none matches the repo name the choice is ambiguous, so the updater falls back to the zipball rather than guess — name the one you want with `$asset` in that case.
 
-How the named asset gets onto the release:
+How an asset gets onto the release:
 
-- **Manual release:** when drafting the release, drag your zip into the **"Attach binaries by dropping them here or selecting them"** area, then pass its filename as `$asset`.
-- **Automated release (`release.yml`):** the workflow builds `<slug>.zip` (applying the [default excludes](#default-packaging-excludes) and your `EXCLUDE_EXTRA`) and attaches it. To install that curated zip rather than the raw source zipball, pass `'<slug>.zip'` as `$asset` — otherwise the workflow's excludes are not applied to what users receive.
+- **Manual release:** when drafting the release, drag your zip into the **"Attach binaries by dropping them here or selecting them"** area. Name it `<repo-name>.zip` to have it picked up automatically, or pass its filename as `$asset`.
+- **Automated release (`release.yml`):** the workflow builds `<slug>.zip` (applying the default excludes and your `EXCLUDE_EXTRA`) and attaches it. It is installed automatically — no `$asset` needed. Pass `$asset` only to override which attached zip is used.
 
 ### Zip layout requirement
 

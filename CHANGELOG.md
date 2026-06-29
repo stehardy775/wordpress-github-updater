@@ -2,12 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
-## 2.2.1 - 24/06/2026
+## 2.3.0 - 29th June 2026
+
+### Fixed
+- Resolved issues with EXCLUDE files feature
+
+## 2.2.1 - 24th June 2026
 
 ### Fixed
 - Resolved missing dependancy in proxy requirements.txt
 
-## 2.2.0 - 24/06/2026
+## 2.2.0 - 24th June 2026
 
 ### Added
 - **Update-proxy mode** for private repositories. The third constructor argument now accepts `[ 'proxy' => 'https://…', 'secret' => '…' ]` instead of a token. In proxy mode the plugin sends no GitHub credentials — the token lives only on the proxy server, so nothing secret is embedded in the distributed plugin/theme. Each request carries an `X-GHU-Site` header (for logging) and, when configured, an `X-GHU-Key` shared-secret header.
@@ -21,7 +26,7 @@ All notable changes to this project are documented in this file.
 ### Changed
 - The constructor's third parameter is now `string|array $auth`. Passing a token string keeps the previous behaviour (direct GitHub access), so existing setups are unaffected; passing an array enables proxy mode.
 
-## 2.1.0 - 22/06/2026
+## 2.1.0 - 22nd June 2026
 
 ### Added
 - Per-item **"Check for updates"** control. Plugins get a "Check for updates" link in their Plugins-list row; themes get a "Check for updates" button (as an admin notice on the Themes screen, since `themes.php` has no per-row action hook). Each forces a fresh GitHub lookup for that single item and reports the result.
@@ -30,12 +35,12 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - A forced update check now bypasses the updater's own transient cache. WordPress's "Check Again" (and the new per-item button) previously kept serving the cached release — including the 1-minute failure marker — so a freshly published release would not appear in wp-admin until the cache expired.
 
-## 2.0.1 - 17/06/2026
+## 2.0.1 - 17th June 2026
 
 ### Added
 - `release.yml`: additional default packaging excludes for tool caches — `.phpcs-cache` (PHP_CodeSniffer) and `.phpunit.cache` (PHPUnit 10+ cache directory).
 
-## 2.0.0 - 17/06/2026
+## 2.0.0 - 17th June 2026
 
 ### Added
 - Optional 4th constructor argument `$asset` to choose which release asset to install (e.g. `'my-plugin.zip'`). Accepts a path such as `dist/my-plugin.zip` (only the filename is used) and falls back to the source zipball when the named asset is absent.
@@ -55,5 +60,5 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - Corrected the GitHub API `User-Agent` string to match the release version.
 
-## 1.0.0 - 13/03/2026
+## 1.0.0 - 13th March 2026
 - Initial release.

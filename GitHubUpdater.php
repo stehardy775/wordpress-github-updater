@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.2.0
+ * @version 2.3.0
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -477,33 +477,79 @@ class GitHubUpdater {
 	/**
 	 * Returns the download URL for a release.
 	 *
-	 * When a release asset is configured (4th constructor argument), the
-	 * matching asset is used — this gives full control over the zip contents.
-	 * If no asset is configured, or the named asset is not present on the
-	 * release, GitHub's auto-generated source zipball is used instead.
+	 * The package is chosen by resolve_asset_name():
+	 *   - An explicitly configured asset (4th constructor argument) is used as-is.
+	 *   - With no asset configured, the curated zip attached by the release
+	 *     workflow (built with the packaging excludes applied) is used when one
+	 *     is present.
+	 *   - Otherwise GitHub's auto-generated source zipball is used.
 	 */
 	private function download_url( array $release ): string {
+		$asset = $this->resolve_asset_name( $release );
+
 		// Proxy mode: hand WordPress a proxy URL keyed by tag (and asset name,
 		// if any). The proxy resolves the asset/zipball and authenticates the
 		// GitHub download itself, so no GitHub URL or token is exposed here.
 		if ( $this->proxy !== '' ) {
 			$query = [ 'ghu' => 'download', 'repo' => $this->repo, 'tag' => $release['tag_name'] ];
-			if ( $this->asset !== '' ) {
-				$query['asset'] = $this->asset;
+			if ( $asset !== '' ) {
+				$query['asset'] = $asset;
 			}
 			return add_query_arg( $query, trailingslashit( $this->proxy ) );
 		}
 
-		if ( $this->asset !== '' ) {
-			foreach ( $release['assets'] ?? [] as $asset ) {
-				if ( $asset['name'] === $this->asset ) {
+		if ( $asset !== '' ) {
+			foreach ( $release['assets'] ?? [] as $candidate ) {
+				if ( ( $candidate['name'] ?? '' ) === $asset ) {
 					// Asset API URL; needs Accept: application/octet-stream to download.
-					return $asset['url'];
+					return $candidate['url'];
 				}
 			}
 		}
 
 		return $release['zipball_url'];
+	}
+
+	/**
+	 * Decides which release asset filename to download, or '' to fall back to
+	 * GitHub's source zipball.
+	 *
+	 * When an asset is configured (4th constructor argument) it always wins.
+	 *
+	 * With no asset configured we install the curated zip that the release
+	 * workflow attaches — built with the default excludes and EXCLUDE_EXTRA
+	 * applied — so users never receive the raw repo (.github, AGENTS.md, etc.).
+	 * The constructor cannot see SLUG_OVERRIDE (that lives in
+	 * .githubupdater.conf, read only by CI), so the asset is discovered from
+	 * the release rather than reconstructed by name: GitHub's source zipball is
+	 * never listed under $release['assets'], so anything there is a genuine
+	 * uploaded asset. We prefer "<repo-name>.zip"; failing that, the sole
+	 * attached zip. If several zips are attached and none matches the repo name
+	 * the choice is ambiguous, so we fall back to the zipball.
+	 */
+	private function resolve_asset_name( array $release ): string {
+		if ( $this->asset !== '' ) {
+			return $this->asset;
+		}
+
+		$zips = [];
+		foreach ( $release['assets'] ?? [] as $asset ) {
+			$name = $asset['name'] ?? '';
+			if ( str_ends_with( strtolower( $name ), '.zip' ) ) {
+				$zips[] = $name;
+			}
+		}
+
+		if ( ! $zips ) {
+			return '';
+		}
+
+		$repo_zip = basename( $this->repo ) . '.zip';
+		if ( in_array( $repo_zip, $zips, true ) ) {
+			return $repo_zip;
+		}
+
+		return ( count( $zips ) === 1 ) ? $zips[0] : '';
 	}
 
 	/**
