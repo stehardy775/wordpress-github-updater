@@ -18,7 +18,7 @@ on:
 
 # One deploy at a time; a newer push supersedes an in-flight run.
 concurrency:
-  group: deploy-proxy
+  group: deploy-proxy-dowo
   cancel-in-progress: true
 
 jobs:
