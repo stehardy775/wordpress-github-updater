@@ -1,9 +1,9 @@
-fastapi==0.141.*
-uvicorn[standard]==0.52.*
-gunicorn==26.0.*
+fastapi==0.142.*
+uvicorn[standard]==0.54.*
+gunicorn==26.2.*
 httpx==0.28.*
 python-multipart==0.0.*
-azure-identity==1.25.*
+azure-identity==1.26.*
 azure-monitor-ingestion==1.1.*
 azure-monitor-query==2.0.*
 azure-data-tables==12.7.*

@@ -14,6 +14,11 @@ on:
     paths:
       - 'proxy/**'
       - '.github/workflows/main_lumeniq-wordpress-updates.yml'
+  # Weekly redeploy so Oryx re-resolves requirements.txt and picks up patched
+  # transitive dependencies (anyio, urllib3, pyjwt, ...) that aren't pinned.
+  # Runs an hour after the Monday Proxy Dependency Audit.
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 # One deploy at a time; a newer push supersedes an in-flight run.
@@ -37,3 +42,13 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_7AE7C08FDE904FE9B4C7E8503F3C1676 }}
           package: proxy   # deploy this folder only; Oryx builds requirements.txt
+
+      - name: Health check
+        run: |
+          url="${{ steps.deploy-to-webapp.outputs.webapp-url }}/healthz"
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$url"; then echo; echo "Healthy: $url"; exit 0; fi
+            echo "Attempt $i failed; retrying in 15s..."; sleep 15
+          done
+          echo "::error::$url did not become healthy after deploy"
+          exit 1
