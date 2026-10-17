@@ -1,10 +1,14 @@
 # Change Log
 
-All notable changes to this project are documented in this file.
+## 2.3.4 - 17th October 2026
+
+- Dependency Updates
+- Exclude Superpowers from release
+- Resolve Precommit Hook Issues
 
 ## 2.3.3 - 6th October 2026
 
-- Dependancy Updates
+- Dependency Updates
 
 ## 2.3.2 - 10th August 2026
 

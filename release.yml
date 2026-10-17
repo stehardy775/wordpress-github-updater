@@ -1,6 +1,6 @@
 name: Release on Version Bump
 
-# Version: 2.0.1
+# Version: 2.3.4
 # Full setup and usage documentation:
 # https://github.com/stehardy775/wordpress-github-updater/README.md
 #
@@ -163,6 +163,7 @@ jobs:
             "GEMINI.md"
             "copilot-instructions.md"  # GitHub Copilot
             ".copilot"
+            "docs/superpowers" # Superpowers (skill specs/plans)
             # OS & editor cruft
             ".DS_Store"
             "Thumbs.db"

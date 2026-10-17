@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.3.1
+ * @version 2.3.4
  */
 
 if ( ! defined( 'ABSPATH' ) ) {

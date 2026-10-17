@@ -56,7 +56,7 @@ Keep this copyright reference up to date wherever it appears:
 ## Packaging Expectations
 
 - Release zip root must match plugin/theme slug.
-- Exclude development metadata from packaged zip: version control (`.git`, `.github`, `.gitignore`, `.gitattributes`, `.gitmodules`), AI assistant config (`.claude`/`CLAUDE.md`, `.codex`/`AGENTS.md`, `.cursor`/`.cursorrules`, `.aider*`, `.windsurf`, `.continue`, `.gemini`/`GEMINI.md`, `copilot-instructions.md`), OS/editor cruft (`.DS_Store`, `Thumbs.db`, `.vscode`, `.idea`, `.editorconfig`), build artefacts (`node_modules`), and this updater's own tooling (`.githubupdater.conf`, `pre-commit`).
+- Exclude development metadata from packaged zip: version control (`.git`, `.github`, `.gitignore`, `.gitattributes`, `.gitmodules`), AI assistant config (`.claude`/`CLAUDE.md`, `.codex`/`AGENTS.md`, `.cursor`/`.cursorrules`, `.aider*`, `.windsurf`, `.continue`, `.gemini`/`GEMINI.md`, `copilot-instructions.md`, `docs/superpowers`), OS/editor cruft (`.DS_Store`, `Thumbs.db`, `.vscode`, `.idea`, `.editorconfig`), build artefacts (`node_modules`), and this updater's own tooling (`.githubupdater.conf`, `pre-commit`).
 - Workflow options (`SOURCE_FILE_OVERRIDE`, `SLUG_OVERRIDE`, `EXCLUDE_EXTRA`) are configured in `.githubupdater.conf` at the repo root, which the workflow sources in its "Load project config" step. `EXCLUDE_EXTRA` is a whitespace/newline-separated list of extra rsync exclude patterns. The same file also holds the pre-commit hook's copy destinations; keep both concerns documented when editing it.
 - Do **not** exclude `vendor/` by default – many plugins ship Composer runtime deps there.
 - Keep `LICENSE` included in release artefacts.

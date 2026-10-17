@@ -57,11 +57,13 @@ fi
 chmod +x .git/hooks/pre-commit
 ```
 
-Both approaches preserve an existing `pre-commit` hook and are safe to re-run — the updater block is only added once. The `INSTALL_HOOK=1` one-liner additionally seeds a `.githubupdater.conf` template (only if you don't already have one), giving you a ready-to-edit config for paths and packaging options.
+Both approaches preserve an existing `pre-commit` hook and are safe to re-run — the updater block is only added once. Re-running the `INSTALL_HOOK=1` one-liner also **refreshes** an existing updater block in place (everything else in the hook is kept), which is how existing projects pick up fixes to the hook itself. The one-liner additionally seeds a `.githubupdater.conf` template (only if you don't already have one), giving you a ready-to-edit config for paths and packaging options.
 
 > **Other hook managers are left alone.** If your existing `pre-commit` hook is managed by another tool (Husky, [pre-commit.com](https://pre-commit.com), lefthook) or isn't a shell script, `INSTALL_HOOK=1` detects this and **won't modify it** — it prints how to wire the updater in yourself instead. It only appends to plain, unmanaged shell hooks.
 
-It will now run automatically on every commit. To run it on demand instead, see [Fetch the latest copy manually via CLI](#3-fetch-the-latest-copy-manually-via-cli) below.
+It will now run automatically on every commit. When upstream has changed, the refreshed files are **staged and included in the commit you're making**, so nothing is left behind as an uncommitted change; when they're already current, nothing is touched. Path-limited commits (`git commit -- <paths>`, as some IDEs make) skip the update – Git can't safely stage extra files from a hook in that mode – and it happens on your next normal commit instead.
+
+To run it on demand instead, see [Fetch the latest copy manually via CLI](#3-fetch-the-latest-copy-manually-via-cli) below.
 
 To override the destination paths, copy `.githubupdater.conf` into your project root and edit:
 
@@ -85,7 +87,7 @@ bash pre-commit
 curl -fsSL https://raw.githubusercontent.com/stehardy775/wordpress-github-updater/main/pre-commit | bash
 ```
 
-Each writes the latest files to the configured destinations (or the defaults: `includes/GitHubUpdater.php` and `.github/workflows/release.yml`) and prints what it downloaded. The command must be run from within a Git working tree — it uses `git rev-parse --show-toplevel` to resolve paths.
+Each writes the latest files to the configured destinations (or the defaults: `includes/GitHubUpdater.php` and `.github/workflows/release.yml`) and prints what it downloaded. Run by hand, it leaves the updated files unstaged for you to review and commit. The command must be run from within a Git working tree — it uses `git rev-parse --show-toplevel` to resolve paths.
 
 ---
 
@@ -269,7 +271,7 @@ EXCLUDE_EXTRA="tests docs *.dist phpunit.xml.dist composer.json composer.lock"
 The workflow already excludes the following from the release zip, so you rarely need `EXCLUDE_EXTRA` for common cases:
 
 - **Version control & CI:** `.git`, `.github`, `.gitignore`, `.gitattributes`, `.gitmodules`
-- **AI assistant config/metadata:** `.claude`, `CLAUDE.md`, `.codex`, `AGENTS.md`, `.cursor`, `.cursorrules`, `.cursorignore`, `.aider*`, `.windsurf`, `.windsurfrules`, `.continue`, `.gemini`, `GEMINI.md`, `copilot-instructions.md`, `.copilot`
+- **AI assistant config/metadata:** `.claude`, `CLAUDE.md`, `.codex`, `AGENTS.md`, `.cursor`, `.cursorrules`, `.cursorignore`, `.aider*`, `.windsurf`, `.windsurfrules`, `.continue`, `.gemini`, `GEMINI.md`, `copilot-instructions.md`, `.copilot`, `docs/superpowers` (Superpowers specs/plans)
 - **OS & editor cruft:** `.DS_Store`, `Thumbs.db`, `.vscode`, `.idea`, `.editorconfig`
 - **Dependency & build artefacts:** `node_modules`
 - **Linting & testing config and caches:** `phpcs.xml`, `phpcs.xml.dist`, `.phpcs.xml.dist`, `.phpcs-cache`, `phpunit.xml`, `phpunit.xml.dist`, `.phpunit.result.cache`, `.phpunit.cache`
