@@ -338,9 +338,9 @@ For the WordPress "View details" popup:
 
 - Title uses the plugin header `Plugin Name` (or theme `Name`) instead of slug.
 - Description tab uses `README.md` (or `readme.md`) when present; otherwise it falls back to the GitHub release title.
-- Changelog tab uses `CHANGELOG.md` (or `changelog.md`) when present; otherwise it falls back to release notes body, then "See GitHub Releases for changelog.".
+- Change Log tab uses `CHANGELOG.md` (or `changelog.md`) when present; otherwise it falls back to release notes body, then "See GitHub Releases for changelog.". The tab is labelled "Change Log" but keeps the `changelog` section key, so WordPress's "View version x details" link still opens it directly.
 
-Markdown sources are rendered to a safe HTML subset (headings, bold, italic, inline/fenced code, links, and lists). The output is sanitised with `wp_kses_post()`, so unsupported syntax simply appears as plain text rather than being executed.
+Markdown sources are rendered to a safe HTML subset (headings, bold, italic, inline/fenced code, links, bare email addresses as `mailto:` links, and lists). The output is sanitised with `wp_kses_post()`, so unsupported syntax simply appears as plain text rather than being executed. 
 
 ### Compatibility metadata
 

@@ -8,7 +8,7 @@
  * License: Copyright (C) 2026 Ste Hardy (www.stehardy.co.uk)
  * https://github.com/stehardy775/wordpress-github-updater/LICENSE
  *
- * @version 2.3.4
+ * @version 2.3.5
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -264,7 +264,8 @@ class GitHubUpdater {
 	/**
 	 * Renders a useful subset of Markdown to sanitised HTML for the
 	 * "View details" popup: fenced/inline code, headings, bold, italic,
-	 * links, and unordered/ordered lists. Anything else is shown as text.
+	 * links, bare email addresses (as mailto: links), and unordered/ordered
+	 * lists. Anything else is shown as text.
 	 *
 	 * This is intentionally lightweight (no external parser) and the result
 	 * is always passed through wp_kses_post(), so untrusted release content
@@ -280,7 +281,9 @@ class GitHubUpdater {
 			'/```[a-zA-Z0-9_-]*\n(.*?)```/s',
 			static function ( $m ) use ( &$code_blocks ) {
 				$key                 = "\x00CODE" . count( $code_blocks ) . "\x00";
-				$code_blocks[ $key ] = '<pre><code>' . esc_html( $m[1] ) . '</code></pre>';
+				// Drop the newline before the closing fence so the block does
+				// not render with a trailing blank line.
+				$code_blocks[ $key ] = '<pre><code>' . esc_html( rtrim( $m[1], "\n" ) ) . '</code></pre>';
 				return $key;
 			},
 			$text
@@ -311,6 +314,20 @@ class GitHubUpdater {
 			static function ( $m ) {
 				$url = esc_url( html_entity_decode( $m[2], ENT_QUOTES ) );
 				return $url ? '<a href="' . $url . '">' . $m[1] . '</a>' : $m[0];
+			},
+			$text
+		);
+
+		// Bare email addresses (optionally in <…> autolink form) become
+		// mailto: links. Existing links and inline code are matched first
+		// and left untouched.
+		$text = preg_replace_callback(
+			'#(<a\s[^>]*>.*?</a>|<code>.*?</code>)|(?:&lt;)?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:&gt;)?#s',
+			static function ( $m ) {
+				if ( '' !== $m[1] ) {
+					return $m[0];
+				}
+				return '<a href="mailto:' . esc_attr( $m[2] ) . '">' . $m[2] . '</a>';
 			},
 			$text
 		);
@@ -353,14 +370,23 @@ class GitHubUpdater {
 	// =========================================================================
 
 	public function register_hooks(): void {
-		// Only run on admin pages where update checks happen.
-		if ( ! is_admin() ) {
+		// Only run where update checks happen: admin pages, plus WP-Cron and
+		// WP-CLI, which also rebuild the update transients. Skipping cron
+		// meant scheduled checks (and auto-updates) dropped this item from
+		// the transient, removing its "View details" link until the next
+		// admin-side check.
+		if ( ! is_admin() && ! wp_doing_cron() && ! ( defined( 'WP_CLI' ) && WP_CLI ) ) {
 			return;
 		}
 
 		if ( $this->type === 'plugin' ) {
 			add_filter( 'pre_set_site_transient_update_plugins', [ $this, 'inject_plugin_update' ] );
 			add_filter( 'plugins_api', [ $this, 'plugin_info' ], 10, 3 );
+
+			// "View details" popup: relabel the Changelog tab and tidy the
+			// rendered Markdown's typography.
+			add_filter( 'gettext_with_context', [ $this, 'relabel_changelog_tab' ], 10, 4 );
+			add_action( 'admin_head-plugin-install.php', [ $this, 'print_plugin_info_styles' ] );
 
 			// Per-plugin "Check for updates" link in the Plugins list row.
 			add_filter( 'plugin_action_links_' . $this->slug, [ $this, 'add_plugin_check_link' ] );
@@ -701,6 +727,57 @@ class GitHubUpdater {
 			],
 			'external'      => true,
 		];
+	}
+
+	/**
+	 * Whether the current request is the "View details" popup for this plugin.
+	 */
+	private function is_own_plugin_info_request(): bool {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, compared against a known slug.
+		if ( ( $_GET['tab'] ?? '' ) !== 'plugin-information' || ! isset( $_GET['plugin'] ) ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		return sanitize_key( wp_unslash( $_GET['plugin'] ) ) === dirname( $this->slug );
+	}
+
+	/**
+	 * Shows the "changelog" section's tab as "Change Log" in this plugin's
+	 * popup. The section key itself stays "changelog" because WordPress's
+	 * "View version x details" link deep-links to section=changelog.
+	 */
+	public function relabel_changelog_tab( $translation, $text, $context, $domain ) {
+		if ( 'Changelog' === $text && 'Plugin installer section title' === $context && $this->is_own_plugin_info_request() ) {
+			return 'Change Log';
+		}
+
+		return $translation;
+	}
+
+	/**
+	 * Tidies core's popup styles for rendered Markdown: core gives h3 a
+	 * 2.5em top margin and clears h2, leaving large gaps between headings;
+	 * h5/h6 are smaller than body text; and inline <code> padding and
+	 * background bleed into fenced code blocks, which also get a proper
+	 * code-block treatment.
+	 */
+	public function print_plugin_info_styles(): void {
+		if ( ! $this->is_own_plugin_info_request() ) {
+			return;
+		}
+		?>
+		<style>
+			#plugin-information .section :is(h1, h2, h3, h4, h5, h6) { clear: none; margin: 1.5em 0 0.5em; line-height: 1.4; }
+			#plugin-information .section h1 { margin-top: 0.5em; }
+			#plugin-information .section h4 { font-size: 1.15em; }
+			#plugin-information .section h5 { font-size: 1em; }
+			#plugin-information .section h6 { font-size: 0.9em; }
+			#plugin-information .section :is(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6) { margin-top: 0.5em; }
+			#plugin-information .section pre { margin: 1em 0 1.5em; padding: 12px 16px; background: #f6f7f7; border: 1px solid #dcdcde; border-left: 4px solid #2271b1; border-radius: 4px; overflow-x: auto; white-space: pre; tab-size: 4; }
+			#plugin-information .section pre code { display: block; padding: 0; margin: 0; background: none; font-family: Menlo, Consolas, Monaco, "Liberation Mono", monospace; font-size: 13px; line-height: 1.6; color: #1d2327; }
+		</style>
+		<?php
 	}
 
 	// =========================================================================

@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.3.5 - 17th October 2026
+
+- Reworked Markdown to HTML to improve readability
+
 ## 2.3.4 - 17th October 2026
 
 - Dependency Updates
