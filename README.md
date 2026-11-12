@@ -281,7 +281,7 @@ The workflow already excludes the following from the release zip, so you rarely 
 
 Maintenance note:
 
-- Keep action versions in copied workflows up to date (for example `actions/checkout@v5`) to stay compatible with GitHub-hosted runner runtime changes.
+- Keep action versions in copied workflows up to date (for example `actions/checkout@v7`) to stay compatible with GitHub-hosted runner runtime changes.
 
 Behavior in the target project:
 
