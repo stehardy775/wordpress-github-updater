@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Deploy proxy/ to Azure Web App
         uses: azure/webapps-deploy@v3

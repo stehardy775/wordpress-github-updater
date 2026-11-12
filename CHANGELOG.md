@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Change Log](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The `release.yml` template now uses `actions/checkout@v7`. Projects using the pre-commit hook will pick this up on their next commit, rather than having the hook revert a manual bump back to v5.
+
 ## [2.3.5] - 2026-10-17
 
 ### Changed
